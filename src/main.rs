@@ -1,8 +1,6 @@
 use actix_web::{middleware, web, App, Error, HttpResponse, HttpServer};
 use async_trait::async_trait;
 use anyhow::*;
-use bb8::*;
-use bb8_tiberius::*;
 use serde::Deserialize;
 use std::env;
 use tiberius::{AuthMethod, Config};
@@ -11,6 +9,7 @@ use async_std::net::TcpStream;
 use deadpool::*;
 
 type RecycleResult = deadpool::managed::RecycleResult<tiberius::error::Error>;
+type Pool = deadpool::managed::Pool<tiberius::Client<TcpStream>, tiberius::error::Error>;
 
 pub struct Manager {
   config : tiberius::Config,
@@ -43,9 +42,9 @@ pub struct IndexQuery {
 }
 
 async fn db_example(
-    pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
+    pool: &Pool,
     roundtrip_number: &i32,
-) -> Result<Option<i32>, RunError<tiberius::error::Error>> {
+) -> Result<Option<i32>, tiberius::error::Error> {
     let mut client = match pool.get().await {
         Ok(client) => client,
         Err(e) => panic!("DB connection timeout {:?}", e),
@@ -58,7 +57,7 @@ async fn db_example(
 /// Async request handler. Ddb pool is stored in application state.
 async fn index(
     web::Query(query): web::Query<IndexQuery>,
-    pool: web::Data<Pool<ConnectionManager>>,
+    pool: web::Data<Pool>,
 ) -> Result<HttpResponse, Error> {
     match db_example(&pool, &query.number).await {
         Ok(res) => Ok(HttpResponse::Ok().json(res)),
@@ -111,9 +110,8 @@ async fn main() -> anyhow::Result<(), anyhow::Error> {
     // Using SQL Server authentication.
     config.authentication(AuthMethod::sql_server(settings.user, settings.pw));
 
-    let mgr = bb8_tiberius::ConnectionManager::new(config);
-    let pool: bb8::Pool<bb8_tiberius::ConnectionManager> =
-        bb8::Pool::builder().max_size(2 as u32).build(mgr).await?;
+    let mgr = Manager {config};
+    let pool = Pool::new(mgr, 16);
 
     // start http server
     HttpServer::new(move || {
