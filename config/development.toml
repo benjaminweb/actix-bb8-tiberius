@@ -1,0 +1,6 @@
+host="localhost"
+port=1433
+trust_cert = true
+database="db"
+user="SA"
+pw="<password>"
