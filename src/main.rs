@@ -1,40 +1,12 @@
 use actix_web::{middleware, web, App, Error, HttpResponse, HttpServer};
-use async_trait::async_trait;
 use anyhow::*;
 use serde::Deserialize;
 use std::env;
 use tiberius::{AuthMethod, Config};
 extern crate config;
-use async_std::net::TcpStream;
-use deadpool::*;
+use deadpool_tiberius::{Pool, Manager};
 
-type RecycleResult = deadpool::managed::RecycleResult<tiberius::error::Error>;
-type Pool = deadpool::managed::Pool<tiberius::Client<TcpStream>, tiberius::error::Error>;
-
-pub struct Manager {
-  config : tiberius::Config,
-}
-
-impl Manager {
-    pub fn new(config: tiberius::Config) -> Self {
-        Self {config} // modify_tcp_stream: Box::new(|tcp_stream| tcp_stream.set_nodelay(true))
-    }
-}
-
-#[async_trait]
-impl deadpool::managed::Manager<tiberius::Client<TcpStream>, tiberius::error::Error>  for Manager
-{
-    async fn create(&self) -> Result<tiberius::Client<TcpStream>, tiberius::error::Error> {
-        let tcp = TcpStream::connect(self.config.get_addr()).await?;
-        let conn = tiberius::Client::connect(self.config.clone(), tcp).await?;
-        Ok(conn)
-    }
-    async fn recycle(&self, conn: &mut tiberius::Client<TcpStream>) -> RecycleResult {
-        conn.simple_query("SELECT 1").await?;
-        Ok(())
-    }
-
-}
+mod deadpool_tiberius;
 
 #[derive(Deserialize)]
 pub struct IndexQuery {
@@ -110,7 +82,7 @@ async fn main() -> anyhow::Result<(), anyhow::Error> {
     // Using SQL Server authentication.
     config.authentication(AuthMethod::sql_server(settings.user, settings.pw));
 
-    let mgr = Manager {config};
+    let mgr = Manager::new(config);
     let pool = Pool::new(mgr, 16);
 
     // start http server
